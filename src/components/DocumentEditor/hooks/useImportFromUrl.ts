@@ -13,7 +13,6 @@ export function useImportFromUrl() {
             const u = new URL(url.trim());
             return u.toString();
         } catch {
-            // если без протокола — пробуем https
             return `https://${url.trim()}`;
         }
     };

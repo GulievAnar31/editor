@@ -1,5 +1,6 @@
-import { FC, useCallback, useRef, useState } from "react";
+import { FC, useCallback, useRef, useState, useEffect } from "react";
 import "@blocknote/core/style.css";
+import { useSearchParams } from "react-router-dom";
 
 import { useEnsureH1Title } from "../hooks/useEnsureH1Title";
 import { useBlockNoteEditor } from "../hooks/useBlockNoteEditor";
@@ -13,6 +14,7 @@ import { EditorArea } from "../components/EditorArea";
 interface DocumentEditorProps {
     initialMarkdown?: string;
     onSave?: (markdown: string, title?: string) => void;
+    /** Если хотите подменить парсер – передайте свою функцию */
     onImportUrl?: (url: string) => Promise<{ title?: string; markdown: string }>;
     readOnly?: boolean;
     documentTitle?: string;
@@ -30,9 +32,9 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
 
     const intensiveTypingRef = useRef(false);
     const lastTypingRef = useRef(Date.now());
+    const autoImportedRef = useRef(false); // чтобы не дёргать импорт дважды
 
     const { ensureH1Title } = useEnsureH1Title(title);
-
     const { editor } = useBlockNoteEditor({
         initialMarkdown,
         readOnly,
@@ -45,7 +47,15 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
         },
     });
 
-    const { importFromUrl, loading: importLoading, error: importError } = useImportFromUrl();
+    // наш дефолтный парсер с fallback-ом
+    const {
+        importFromUrl: importFromUrlDefault,
+        loading: importLoading,
+        error: importError,
+    } = useImportFromUrl();
+
+    const [searchParams] = useSearchParams();
+    const requestedUrl = searchParams.get("url") ?? undefined;
 
     const getMarkdown = useCallback(async () => {
         if (!editor) throw new Error("Editor is not ready");
@@ -96,9 +106,11 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
         async (url: string) => {
             if (!editor) return;
             try {
-                const parse = onImportUrl ?? importFromUrl;
+                // используем переданный парсер или дефолтный хук
+                const parse = onImportUrl ?? importFromUrlDefault;
                 const { title: newTitle, markdown } = await parse(url);
 
+                // добавим H1 если есть заголовок
                 const prefixed = `${newTitle ? `# ${newTitle}\n\n` : ""}${markdown}`;
                 const blocks = await editor.markdownToBlocks(prefixed);
 
@@ -109,22 +121,36 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
                 console.error("Ошибка при импорте URL:", e);
             }
         },
-        [editor, onImportUrl, importFromUrl]
+        [editor, onImportUrl, importFromUrlDefault]
     );
+
+    // Автоимпорт из query-параметра ?url=...
+    useEffect(() => {
+        if (!editor) return;
+        if (!requestedUrl) return;
+        if (autoImportedRef.current) return;
+
+        autoImportedRef.current = true;
+        handleImportUrl(requestedUrl);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editor, requestedUrl]);
 
     return (
         <EditorFrame
             header={
                 <EditorHeader
-                    title={title}
+                    title={importLoading ? "Загружаю страницу..." : title}
                     dirty={dirty}
                     readOnly={readOnly}
-                    canSave={!!dirty}
+                    canSave={!!dirty && !importLoading}
                     onSave={saveNow}
                     onLog={editor ? handleLog : undefined}
+                    // Кнопка импорта остаётся на всякий случай, но можно и убрать:
                     onImportFromUrl={handleImportUrl}
                 />
             }
+        // можно вывести ошибку импорта в футере/подвале — см. EditorFrame, если хотите
+        // footerHintRight={importError ? "Ошибка импорта: см. консоль" : undefined}
         >
             <EditorArea editor={editor as any} />
         </EditorFrame>
