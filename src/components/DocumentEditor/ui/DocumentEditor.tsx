@@ -4,6 +4,7 @@ import "@blocknote/core/style.css";
 import { useEnsureH1Title } from "../hooks/useEnsureH1Title";
 import { useBlockNoteEditor } from "../hooks/useBlockNoteEditor";
 import { useSmartAutosave } from "../hooks/useSmartAutosave";
+import { useImportFromUrl } from "../hooks/useImportFromUrl";
 
 import { EditorFrame } from "../components/EditorFrame";
 import { EditorHeader } from "../components/EditorHeader";
@@ -12,6 +13,7 @@ import { EditorArea } from "../components/EditorArea";
 interface DocumentEditorProps {
     initialMarkdown?: string;
     onSave?: (markdown: string, title?: string) => void;
+    onImportUrl?: (url: string) => Promise<{ title?: string; markdown: string }>;
     readOnly?: boolean;
     documentTitle?: string;
 }
@@ -19,6 +21,7 @@ interface DocumentEditorProps {
 export const DocumentEditor: FC<DocumentEditorProps> = ({
     initialMarkdown = "",
     onSave,
+    onImportUrl,
     readOnly = false,
     documentTitle = "Новый документ",
 }) => {
@@ -41,6 +44,8 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
             lastTypingRef.current = Date.now();
         },
     });
+
+    const { importFromUrl, loading: importLoading, error: importError } = useImportFromUrl();
 
     const getMarkdown = useCallback(async () => {
         if (!editor) throw new Error("Editor is not ready");
@@ -87,6 +92,26 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
         }
     }, [getMarkdown]);
 
+    const handleImportUrl = useCallback(
+        async (url: string) => {
+            if (!editor) return;
+            try {
+                const parse = onImportUrl ?? importFromUrl;
+                const { title: newTitle, markdown } = await parse(url);
+
+                const prefixed = `${newTitle ? `# ${newTitle}\n\n` : ""}${markdown}`;
+                const blocks = await editor.markdownToBlocks(prefixed);
+
+                editor.replaceBlocks(editor.topLevelBlocks, blocks);
+                setTitle(newTitle || "Импортированный документ");
+                setDirty(true);
+            } catch (e) {
+                console.error("Ошибка при импорте URL:", e);
+            }
+        },
+        [editor, onImportUrl, importFromUrl]
+    );
+
     return (
         <EditorFrame
             header={
@@ -97,6 +122,7 @@ export const DocumentEditor: FC<DocumentEditorProps> = ({
                     canSave={!!dirty}
                     onSave={saveNow}
                     onLog={editor ? handleLog : undefined}
+                    onImportFromUrl={handleImportUrl}
                 />
             }
         >
